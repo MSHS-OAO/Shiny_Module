@@ -19,6 +19,21 @@ filters <- tbl(poolcon, "AMBULATORY_FILTERS")
 historical.data <- tbl(poolcon,  "AMBULATORY_ACCESS")
 historical.data <- historical.data %>% mutate(NEW_PT3 = ifelse(is.na(NEW_PT3), "ESTABLISHED", NEW_PT3))
 
+holid <- tbl(poolcon, "HOLIDAYS")
+holid <- holid %>% distinct(HOLIDAY) %>% rename(holiday = HOLIDAY) %>% collect()
+
+max_date_arrived <- glue("Select max(APPT_MADE_DTTM) AS maxDate FROM AMBULATORY_ACCESS")
+max_date_arrived <- dbGetQuery(poolcon, max_date_arrived)
+max_date_arrived <- as.Date(max_date_arrived$MAXDATE, format="%Y-%m-%d")
+
+daysOfWeek.options <- toupper(c("Mon","Tue","Wed","Thu","Fri","Sat","Sun"))
+
+dateRange_max <- max_date_arrived
+dateRange_min <- "2021-01-01"
+dateRange_min <- as.Date(dateRange_min, format="%Y-%m-%d")
+today <- Sys.Date() %m-% months(6)
+dateRange_start <- as.Date(paste0(format(today, "%Y-%m"), "-01"), "%Y-%m-%d")
+
 
 default_campus_choices <- filters %>% select(CAMPUS) %>% distinct() %>% pull()
 
@@ -380,27 +395,113 @@ VisitTypeServer <- function(id, data, campus, specialty, department, resource, p
 }
 
 
+DateInput <- function(id) {
+  box(
+    title = "Select Date Range:",
+    width = 12, 
+    height = "100px",
+    solidHeader = FALSE, 
+    dateRangeInput(NS(id,"dateRange"), label = NULL,
+                   start = dateRange_start, end = dateRange_max,
+                   min = dateRange_min, max = dateRange_max))
+}
+
+
+
+DateServer <- function(id) {
+  moduleServer(id, function(input, output, session) {
+    
+    return(reactive(input[["dateRange"]]))
+  })
+  
+}
+
+
+weekInput <- function(id){
+  box(
+    title = "Select Days of Week:",
+    width = 12, 
+    solidHeader = FALSE, 
+    pickerInput(NS(id, "daysOfWeek"),
+                label = NULL,
+                choices = daysOfWeek.options,
+                selected = daysOfWeek.options,
+                multiple=TRUE,                        
+                options = pickerOptions(
+                  liveSearch = TRUE,
+                  actionsBox = TRUE,
+                  selectedTextFormat = "count > 1", 
+                  countSelectedText = "{0}/{1} Days", 
+                  dropupAuto = FALSE))
+  )
+}
+  
+  
+
+WeekServer <- function(id) {
+  moduleServer(id, function(input, output, session) {
+    
+    return(reactive(input[["daysOfWeek"]]))
+  })
+  
+}
+
+
+HolidayInput <- function(id){
+  box(
+    title = "Select Holidays to Exclude:",
+    width = 12,
+    solidHeader = FALSE,
+    pickerInput(NS(id, "excludeHolidays"),label=NULL,
+                choices= unique(holid$holiday),
+                multiple=TRUE,
+                options = pickerOptions(
+                  liveSearch = TRUE,
+                  actionsBox = TRUE,
+                  dropupAuto = FALSE),
+                selected = unique(holid$holiday)
+    )
+  )
+}
+
+HolidayServer <- function(id) {
+  moduleServer(id, function(input, output, session) {
+    
+    return(reactive(input[["excludeHolidays"]]))
+  })
+  
+}
+
+
+
+
 #Define UI for the app
 ui <- fluidPage(
-  
+  #profvis_ui("profiler"),
   dropdown(
-    actionButton("filter", "Update"),  
+    actionButton( "filter", "Update"),  
     CampusInput("selectedCampus"),
     SpecialtyInput("selectedSpecialty"),
     DepartmentInput("selectedDepartment"),
     ResourceInput("selectedResource"),
     ProviderInput("selectedProvider"),
     VisitMethodInput("selectedVisitMethod"),
-    VisitTypeInput("selectedPRCName")
+    VisitTypeInput("selectedPRCName"),
+    DateInput("dateRange"),
+    weekInput("daysOfWeek"),
+    HolidayInput("excludeHolidays")
     
   ),
   
+  textOutput("newpatients"),
   plotOutput("newPtWaitTimeByDept", height = "550px")
   
 )
 
 #Define Server for the app
 server <- function(input, output, session) {
+  #ns <- session$ns
+  
   selected_campus <- CampusServer("selectedCampus")
   selected_specialty <- SpecialtyServer("selectedSpecialty", data = filters, campus = selected_campus)
   selected_department <- DepartmentServer("selectedDepartment", data = filters,
@@ -428,11 +529,22 @@ server <- function(input, output, session) {
                                         provider = selected_provider,
                                         visit_method = selected_visitmethod
                                         )
-
+  
+  selected_dateRange <- DateServer("dateRange")
+  selected_daysOfWeek <- WeekServer("daysOfWeek")
+  selected_holiday <- HolidayServer("excludeHolidays")
+ 
+  
+  
+  output$newpatients <- renderText({
+    paste0("Based on data from ", selected_dateRange()[1]," to ", selected_dateRange()[2], 
+           " for ", paste(sort(selected_campus()), collapse = ', '))
+  })
+  
   data_all <- eventReactive(input$filter, {
     
-   
-    
+    format <- "YYYY-MM-DD HH24:MI:SS"
+
     selected_campus <- selected_campus()
     selected_specialty <- selected_specialty()
     selected_department <-  selected_department()
@@ -440,7 +552,17 @@ server <- function(input, output, session) {
     selected_provider <- selected_provider()
     selected_visitmethod <- selected_visitmethod()
     selected_visittype <- selected_visittype()
+    #selected_dateRange <- selected_dateRange()
     
+    
+    min_date <- selected_dateRange()[1]
+    end_date <- selected_dateRange()[2]
+    selected_days <- selected_daysOfWeek()
+    selected_holiday <- selected_holiday()
+    
+    print(min_date)
+    print(end_date)
+    print(selected_days)
     
     if(length(selected_provider) >= 1000){
     
@@ -448,7 +570,12 @@ server <- function(input, output, session) {
                                        CAMPUS_SPECIALTY %in% selected_specialty,
                                        DEPARTMENT %in% selected_department,
                                        RESOURCES %in% selected_resource,
-                                       #PROVIDER %in% selected_provider
+                                       VISIT_METHOD %in% selected_visitmethod,
+                                       #PROVIDER %in% selected_provider,
+                                      TO_DATE(min_date, format) <= APPT_MADE_DATE_YEAR, 
+                                      TO_DATE(end_date, format) >= APPT_MADE_DATE_YEAR, 
+                                       APPT_DAY %in% selected_days, 
+                                      HOLIDAY %in% selected_holiday
                                        )
     
     }
@@ -458,7 +585,12 @@ server <- function(input, output, session) {
                                          CAMPUS_SPECIALTY %in% selected_specialty,
                                          DEPARTMENT %in% selected_department,
                                          RESOURCES %in% selected_resource,
-                                         PROVIDER %in% selected_provider
+                                         PROVIDER %in% selected_provider,
+                                         VISIT_METHOD %in% selected_visitmethod,
+                                         TO_DATE(min_date, format) <= APPT_MADE_DATE_YEAR, 
+                                         TO_DATE(end_date, format) >= APPT_MADE_DATE_YEAR, 
+                                         APPT_DAY %in% selected_days,
+                                         HOLIDAY %in% selected_holiday
       )
     }
   })
@@ -471,8 +603,8 @@ server <- function(input, output, session) {
     
     data <- data_all()
     
-   # test <<- data
-    
+  
+    test_data <<- data
     
     
     # data <- kpi.all.data[all.data.rows,] %>% filter(Campus == "MSUS")
@@ -524,7 +656,7 @@ server <- function(input, output, session) {
     #              size=5, fontface="bold.italic")
     
   })
-  
+  #callModule(profvis_server, "profiler")
 }
 
 shinyApp(ui, server)
