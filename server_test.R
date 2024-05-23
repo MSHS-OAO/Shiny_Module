@@ -1,6 +1,18 @@
 
 ## Shiny Module Function
 print("Shiny Module")
+selected_campus <-   reactiveVal('MSUS')
+selected_specialty <- reactiveVal(default_specialty)
+selected_department <-  reactiveVal(default_departments)
+selected_resource <- reactiveVal(default_resource_type)
+selected_provider <- reactiveVal(default_provider)
+selected_visitmethod <- reactiveVal(default_visit_method)
+selected_visittype <- reactiveVal(default_PRC_name)
+selected_dateRange <- reactiveVal(c(dateRange_start, dateRange_max))
+min_date <- reactiveVal(dateRange_start)
+end_date <- reactiveVal(dateRange_max)
+selected_daysOfWeek <- reactiveVal(c(daysOfWeek.options))
+selected_holiday <- reactiveVal(unique(holid$holiday))
 
 
 # Define Server for Campus
@@ -23,6 +35,7 @@ CampusServer <- function(id) {
 # Define Server for Specialty
 SpecialtyServer <- function(id, data, campus) {
   moduleServer(id, function(input, output, session) {
+    print("sepcialty")
     observeEvent(campus(), {
       if(!is.null(campus())) {
         
@@ -266,8 +279,12 @@ dataAll_access_new <- eventReactive(list(input$update_filter_access), {
   selected_dateRange <- selected_dateRange()
   min_date <- selected_dateRange[1]
   end_date <- selected_dateRange[2]
-  selected_days <- selected_daysOfWeek()
+  selected_daysOfWeek <- selected_daysOfWeek()
   selected_holiday <- selected_holiday()
+  
+  print(selected_daysOfWeek)
+  
+  test_dow <<- selected_daysOfWeek
   
   validate(
     need(selected_campus != "", "Please select a Campus"),
@@ -291,7 +308,7 @@ dataAll_access_new <- eventReactive(list(input$update_filter_access), {
                                        #PROVIDER %in% selected_provider,
                                        TO_DATE(min_date, format) <= APPT_MADE_DATE_YEAR, 
                                        TO_DATE(end_date, format) >= APPT_MADE_DATE_YEAR, 
-                                       APPT_DAY %in% selected_days
+                                       APPT_DAY %in% selected_daysOfWeek
                                        #HOLIDAY %in% selected_holiday
     )
     
@@ -306,7 +323,7 @@ dataAll_access_new <- eventReactive(list(input$update_filter_access), {
                                        VISIT_METHOD %in% selected_visitmethod,
                                        TO_DATE(min_date, format) <= APPT_MADE_DATE_YEAR, 
                                        TO_DATE(end_date, format) >= APPT_MADE_DATE_YEAR, 
-                                       APPT_DAY %in% selected_days
+                                       APPT_DAY %in% selected_daysOfWeek
                                        #HOLIDAY %in% selected_holiday
     )
   }
@@ -508,7 +525,6 @@ dataArrivedNoShow_new <- eventReactive(list(input$update_filter_access),{
 })
 
 ## Access Module
-selected_campus <-   reactiveVal('MSUS')
 
 observeEvent(input$selectedCampus, {
   print("pbserver")
@@ -516,37 +532,41 @@ observeEvent(input$selectedCampus, {
 }, ignoreInit = TRUE,
     ignoreNULL = TRUE)
 
-# selected_campus <- CampusServer("selectedCampus")
-selected_specialty <- SpecialtyServer("selectedSpecialty", data = filters, campus = selected_campus)
-selected_department <- DepartmentServer("selectedDepartment", data = filters,
-                                        campus = selected_campus, specialty = selected_specialty)
-
-selected_resource <- ResourceServer("selectedResource")
-selected_provider <- ProviderServer("selectedProvider", data = filters,
-                                    campus = selected_campus, 
-                                    specialty = selected_specialty,
-                                    department = selected_department, 
-                                    resource = selected_resource)
-
-selected_visitmethod <- VisitMethodServer("selectedVisitMethod", data = filters,
-                                          campus = selected_campus, 
-                                          specialty = selected_specialty,
-                                          department = selected_department, 
-                                          resource = selected_resource,
-                                          provider = selected_provider)
-
-selected_visittype <- VisitTypeServer("selectedPRCName", data = filters,
+observeEvent(input$update_filter_access, {
+  # selected_campus <- CampusServer("selectedCampus")
+  selected_specialty <- SpecialtyServer("selectedSpecialty", data = filters, campus = selected_campus)
+  selected_department <- DepartmentServer("selectedDepartment", data = filters,
+                                          campus = selected_campus, specialty = selected_specialty)
+  
+  selected_resource <- ResourceServer("selectedResource")
+  selected_provider <- ProviderServer("selectedProvider", data = filters,
                                       campus = selected_campus, 
                                       specialty = selected_specialty,
                                       department = selected_department, 
-                                      resource = selected_resource,
-                                      provider = selected_provider,
-                                      visit_method = selected_visitmethod)
+                                      resource = selected_resource)
+  
+  selected_visitmethod <- VisitMethodServer("selectedVisitMethod", data = filters,
+                                            campus = selected_campus, 
+                                            specialty = selected_specialty,
+                                            department = selected_department, 
+                                            resource = selected_resource,
+                                            provider = selected_provider)
+  
+  selected_visittype <- VisitTypeServer("selectedPRCName", data = filters,
+                                        campus = selected_campus, 
+                                        specialty = selected_specialty,
+                                        department = selected_department, 
+                                        resource = selected_resource,
+                                        provider = selected_provider,
+                                        visit_method = selected_visitmethod)
+  
+  
+  selected_dateRange <- DateServer("dateRange")
+  selected_daysOfWeek <- WeekServer("daysOfWeek")
+  selected_holiday <- HolidayServer("excludeHolidays")
+  
+}, ignoreInit = T)
 
-
-selected_dateRange <- DateServer("dateRange")
-selected_daysOfWeek <- WeekServer("daysOfWeek")
-selected_holiday <- HolidayServer("excludeHolidays")
 
 
 
